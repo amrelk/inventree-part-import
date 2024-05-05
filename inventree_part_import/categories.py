@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from inventree.part import ParameterTemplate, PartCategory, PartCategoryParameterTemplate
 
 from .config import (CATEGORIES_CONFIG, PARAMETERS_CONFIG, get_categories_config,
-                     get_parameters_config, update_config_file)
+                     get_parameters_config, update_config_file, get_config)
 from .error_helper import *
 
 def setup_categories_and_parameters(inventree_api):
@@ -161,6 +161,7 @@ class Category:
     ignore: bool
     structural: bool
     aliases: list[str] = field(default_factory=list)
+    ipn_template: str = ""
     parameters: list[str] = field(default_factory=list)
     part_category: PartCategory = None
 
@@ -195,7 +196,7 @@ class Category:
                 )
 
 CATEGORY_ATTRIBUTES = {
-    "_parameters", "_omit_parameters", "_description", "_ignore", "_structural", "_aliases"
+    "_parameters", "_omit_parameters", "_description", "_ignore", "_structural", "_aliases", "_ipn_template"
 }
 def parse_category_recursive(categories_dict, parent_parameters=tuple(), path=tuple()):
     if not categories_dict:
@@ -230,6 +231,7 @@ def parse_category_recursive(categories_dict, parent_parameters=tuple(), path=tu
             ignore=values.get("_ignore", False),
             structural=values.get("_structural", False),
             aliases=values.get("_aliases", []),
+            ipn_template=values.get("_ipn_template", get_config().get("ipn_template", "")), #TODO fix this if parent is None else parent.ipn_template),
             parameters=parameters,
         )
 
