@@ -2,8 +2,8 @@ from dataclasses import dataclass, field
 
 from inventree.part import ParameterTemplate, PartCategory, PartCategoryParameterTemplate
 
-from .config import (CATEGORIES_CONFIG, PARAMETERS_CONFIG, get_categories_config,
-                     get_parameters_config, update_config_file, get_config)
+from .config import (CATEGORIES_CONFIG, PARAMETERS_CONFIG, get_categories_config, get_config,
+                     get_parameters_config, update_config_file)
 from .error_helper import *
 
 def setup_categories_and_parameters(inventree_api):
@@ -161,7 +161,7 @@ class Category:
     ignore: bool
     structural: bool
     aliases: list[str] = field(default_factory=list)
-    ipn_template: str = ""
+    ipn_format: str = ""
     parameters: list[str] = field(default_factory=list)
     part_category: PartCategory = None
 
@@ -217,24 +217,27 @@ def parse_category_recursive(categories_dict, parent_parameters=tuple(), path=tu
             if child.startswith("_") and child not in CATEGORY_ATTRIBUTES:
                 warning(f"ignoring unknown special attribute '{child}' in category '{name}'")
 
+        default_ipn_format = get_config().get("ipn_format") # TODO fix this; parent.ipn_format if parent else get_config().get("ipn_format")
+
         omitted_parameters = values.get("_omit_parameters", [])
         parameters = tuple(set(parent_parameters) - set(omitted_parameters))
         parameters += tuple(values.get("_parameters", []))
         for parameter in set(omitted_parameters) - set(parent_parameters):
             warning(f"failed to omit parameter '{parameter}' in category '{name}'")
-
         new_path = path + (name,)
-        categories[new_path] = Category(
+
+        categories[new_path] = category = Category(
             name=name,
             path=list(new_path),
             description=values.get("_description", name),
             ignore=values.get("_ignore", False),
             structural=values.get("_structural", False),
             aliases=values.get("_aliases", []),
-            ipn_template=values.get("_ipn_template", get_config().get("ipn_template", "")), #TODO fix this if parent is None else parent.ipn_template),
+            ipn_format=values.get("_ipn_format", default_ipn_format),
             parameters=parameters,
         )
 
+        categories.update(parse_category_recursive(values, new_parameters, new_path, category))
         categories.update(parse_category_recursive(values, parameters, new_path))
 
     return categories
