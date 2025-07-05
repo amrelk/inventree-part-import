@@ -18,7 +18,7 @@ dependencies = [
     "browser-cookie3",
     "click",
     "cutie",
-    "digikey-api>=1.0",
+    "digikey-api @ git+https://github.com/flaviut/digikey-api.git",
     "fake-useragent",
     "inventree>=0.13.2",
     "isocodes",
@@ -29,6 +29,7 @@ dependencies = [
     "requests",
     "tablib[ods, xls, xlsx]",
     "thefuzz",
+    "six"
 ]
 
 [project.urls]
@@ -52,6 +53,9 @@ exclude = [
     "tasks.py",
     "shell.nix",
 ]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [project.optional-dependencies]
 dev = ["autopep8", "pre-commit", "pytest"]

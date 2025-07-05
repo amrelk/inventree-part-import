@@ -196,9 +196,9 @@ class Category:
                 )
 
 CATEGORY_ATTRIBUTES = {
-    "_parameters", "_omit_parameters", "_description", "_ignore", "_structural", "_aliases", "_ipn_template"
+    "_parameters", "_omit_parameters", "_description", "_ignore", "_structural", "_aliases", "_ipn_format"
 }
-def parse_category_recursive(categories_dict, parent_parameters=tuple(), path=tuple()):
+def parse_category_recursive(categories_dict, parent_parameters=tuple(), path=tuple(), parent=None):
     if not categories_dict:
         return {}
 
@@ -217,7 +217,7 @@ def parse_category_recursive(categories_dict, parent_parameters=tuple(), path=tu
             if child.startswith("_") and child not in CATEGORY_ATTRIBUTES:
                 warning(f"ignoring unknown special attribute '{child}' in category '{name}'")
 
-        default_ipn_format = get_config().get("ipn_format") # TODO fix this; parent.ipn_format if parent else get_config().get("ipn_format")
+        default_ipn_format = parent.ipn_format if parent else get_config().get("ipn_format")
 
         omitted_parameters = values.get("_omit_parameters", [])
         parameters = tuple(set(parent_parameters) - set(omitted_parameters))
@@ -237,8 +237,7 @@ def parse_category_recursive(categories_dict, parent_parameters=tuple(), path=tu
             parameters=parameters,
         )
 
-        categories.update(parse_category_recursive(values, new_parameters, new_path, category))
-        categories.update(parse_category_recursive(values, parameters, new_path))
+        categories.update(parse_category_recursive(values, parameters, new_path, category))
 
     return categories
 
