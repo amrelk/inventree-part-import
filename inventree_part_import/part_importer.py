@@ -20,6 +20,8 @@ from .inventree_helpers import (create_manufacturer, get_manufacturer_part,
 from .suppliers import search
 from .suppliers.base import ApiPart
 
+import pyperclip
+
 class ImportResult(Enum):
     ERROR = 0
     FAILURE = 1
@@ -155,6 +157,8 @@ class PartImporter:
         if self.ipn == IPNSetting.false:
             return True
         if self.ipn == IPNSetting.true and getattr(self.existing_part, "IPN", None):
+            info(f"IPN: {getattr(self.existing_part, 'IPN', None)}")
+            pyperclip.copy(getattr(self.existing_part, 'IPN', None))
             return True
 
         # find the outer most mapped category (the leaf category)
@@ -210,6 +214,8 @@ class PartImporter:
 
             if self.verbose or self.dry_run:
                 info(f"set part IPN to '{ipn}' using template '{ipn_format}'")
+            info(f"IPN!: {ipn}")
+            pyperclip.copy(ipn)
 
         return True
 
@@ -255,6 +261,7 @@ class PartImporter:
 
             attachment_types = {attachment.comment for attachment in part.getAttachments()}
             if "datasheet" not in attachment_types and api_part.datasheet_url:
+                success(f"Datasheet: {api_part.datasheet_url}")
                 match get_config().get("datasheets"):
                     case "upload":
                         upload_datasheet(part, api_part.datasheet_url)
@@ -495,19 +502,34 @@ class PartImporter:
         values = [str(value).ljust(max_value_length) for value in parameter_matches.values()]
         names = list(parameter_matches.keys())
 
-        choices = (
-            *(f"{value} | {BOLD}{name}{BOLD_END}" for value, name in zip(values, names)),
-            f"{BOLD}Match Parameter Manually ...{BOLD_END}",
-            f"{BOLD}Enter Value Manually ...{BOLD_END}",
-            f"{BOLD}Skip ...{BOLD_END}"
-        )
+        isMountingType = parameter_name == "Mounting Type"
+
+        if isMountingType:
+            choices = (
+                f"{BOLD}SMD?{BOLD_END}",
+                *(f"{value} | {BOLD}{name}{BOLD_END}" for value, name in zip(values, names)),
+                f"{BOLD}Match Parameter Manually ...{BOLD_END}",
+                f"{BOLD}Enter Value Manually ...{BOLD_END}",
+                f"{BOLD}Skip ...{BOLD_END}"
+            )
+        else:
+            choices = (
+                *(f"{value} | {BOLD}{name}{BOLD_END}" for value, name in zip(values, names)),
+                f"{BOLD}Match Parameter Manually ...{BOLD_END}",
+                f"{BOLD}Enter Value Manually ...{BOLD_END}",
+                f"{BOLD}Skip ...{BOLD_END}"
+            )
+
+        indexOffset = 1 if isMountingType else 0
         while True:
             index = select(choices, deselected_prefix="  ", selected_prefix="> ")
-            if index == N_MATCHES + 1:
+            if isMountingType and index == 0:
+                return None, "SMD"
+            if index == N_MATCHES + 1 + indexOffset:
                 return None, prompt_input("value")
-            if index == N_MATCHES + 2:
+            if index == N_MATCHES + 2 + indexOffset:
                 return None, None
-            elif index < N_MATCHES:
+            elif index < N_MATCHES + indexOffset:
                 return parameter_matches_items[index]
 
             name = prompt_input("parameter name")

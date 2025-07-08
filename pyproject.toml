@@ -29,7 +29,8 @@ dependencies = [
     "requests",
     "tablib[ods, xls, xlsx]",
     "thefuzz",
-    "six"
+    "six",
+    "pyperclip"
 ]
 
 [project.urls]
