@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.10, <4.0"
 
 [[package]]
@@ -292,7 +292,7 @@ wheels = [
 
 [[package]]
 name = "inventree-part-import"
-version = "1.9.0"
+version = "1.9.1"
 source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },
