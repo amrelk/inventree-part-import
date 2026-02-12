@@ -2,9 +2,9 @@ import os
 from types import MethodType
 
 from bs4 import BeautifulSoup
+from error_helper import hint, warning
 from mouser.api import MouserPartSearchRequest
 
-from ..error_helper import *
 from ..retries import retry_timeouts
 from .base import (
     DOMAIN_REGEX,
@@ -21,7 +21,16 @@ class Mouser(ScrapeSupplier):
 
     fallback_domains = ["www2.mouser.com", "eu.mouser.com"]
 
-    def setup(self, api_key, currency, scraping, browser_cookies="", locale_url="www.mouser.com"):
+    def setup(
+        self,
+        *,
+        api_key,
+        currency,
+        scraping,
+        browser_cookies="",
+        locale_url="www.mouser.com",
+        **kwargs,
+    ):
         os.environ["MOUSER_PART_API_KEY"] = api_key
 
         self.currency = currency

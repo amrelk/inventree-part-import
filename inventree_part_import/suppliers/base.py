@@ -8,11 +8,11 @@ from http.cookiejar import CookieJar
 from inspect import _empty
 
 import browser_cookie3
+from error_helper import error, warning
 from fake_useragent import UserAgent
 from requests import Response, Session
 
 from ..config import get_config, get_pre_creation_hooks
-from ..error_helper import error, warning
 from ..retries import retry_timeouts
 
 @dataclass
@@ -32,9 +32,13 @@ class ApiPart:
     price_breaks: dict[int, float]
     currency: str
 
+    def __post_init__(self):
+        self._fix_urls()
+
     def finalize(self):
         if not self.finalize_hook():
             return False
+        self._fix_urls()
         for pre_creation_hook in get_pre_creation_hooks():
             pre_creation_hook(self)
         return True
@@ -69,22 +73,32 @@ class ApiPart:
             data["available"] = min(float(self.quantity_available), 9999999.0)
         return data
 
+    def _fix_urls(self):
+        if self.image_url and self.image_url.startswith("//"):
+            self.image_url = f"https:{self.image_url}"
+        if self.datasheet_url and self.datasheet_url.startswith("//"):
+            self.datasheet_url = f"https:{self.datasheet_url}"
+        if self.supplier_link and self.supplier_link.startswith("//"):
+            self.supplier_link = f"https:{self.supplier_link}"
+        if self.manufacturer_link and self.manufacturer_link.startswith("//"):
+            self.manufacturer_link = f"https:{self.manufacturer_link}"
+
 class SupplierSupportLevel(IntEnum):
     OFFICIAL_API = 0
     INOFFICIAL_API = 1
     SCRAPING = 2
 
 class Supplier:
-    SUPPORT_LEVEL: SupplierSupportLevel = None
+    SUPPORT_LEVEL: SupplierSupportLevel
 
-    def setup(self) -> bool:
-        pass
+    def setup(self, **kwargs) -> bool:
+        return True
 
     def _get_setup_params(self):
         return {
-            name: parameter.default if parameter.default is not _empty else None
+            name: None if parameter.default is _empty else parameter.default
             for name, parameter in inspect.signature(self.setup).parameters.items()
-            if name != "self"
+            if name not in {"self", "kwargs"}
         }
 
     def search(self, search_term: str) -> tuple[list[ApiPart], int]:

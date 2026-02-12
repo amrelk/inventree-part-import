@@ -1,11 +1,12 @@
 [project]
 name = "inventree-part-import"
-version = "1.8.1"
+version = "1.9.1"
 description = "CLI to import parts from suppliers like DigiKey, LCSC, Mouser, etc. to InvenTree"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<4.0"
 classifiers = [
     "Environment :: Console",
+    "Framework :: InvenTree",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
@@ -18,19 +19,17 @@ dependencies = [
     "browser-cookie3",
     "click",
     "cutie",
-    "digikey-api @ git+https://github.com/flaviut/digikey-api.git",
+    "error-helper",
     "fake-useragent",
-    "inventree>=0.13.2",
+    "inventree>=0.13.2,<0.20.0",
     "isocodes",
-    "jinja2",
     "mouser>=0.1.5",
     "platformdirs>=3.2.0",
     "pyyaml",
     "requests",
+    "requests-oauthlib",
     "tablib[ods, xls, xlsx]",
     "thefuzz",
-    "six",
-    "pyperclip"
 ]
 
 [project.urls]
@@ -52,11 +51,9 @@ exclude = [
     ".pre-commit-config.yaml",
     "tests/",
     "tasks.py",
-    "shell.nix",
+    "flake.nix",
+    "flake.lock",
 ]
-
-[tool.hatch.metadata]
-allow-direct-references = true
 
 [project.optional-dependencies]
 dev = ["autopep8", "pre-commit", "pytest"]

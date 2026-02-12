@@ -1,143 +1,181 @@
-import logging, os
+from error_helper import error
+from oauthlib.oauth2 import BackendApplicationClient
+from requests.compat import quote
+from requests.exceptions import HTTPError, JSONDecodeError, Timeout
+from requests_oauthlib import OAuth2Session
 
-import digikey
-from digikey import DigikeyApi
-from digikey.v4.productinformation import KeywordRequest, KeywordResponse, Product
-from digikey.v4.productinformation.api import ProductSearchApi
-from platformdirs import user_cache_path
-
-from .. import __package__ as parent_package
 from ..localization import get_country, get_language
 from ..retries import retry_timeouts
 from .base import ApiPart, Supplier, SupplierSupportLevel
-
-DIGIKEY_CACHE = user_cache_path(parent_package, ensure_exists=True) / "digikey"
-DIGIKEY_CACHE.mkdir(parents=True, exist_ok=True)
 
 
 class DigiKey(Supplier):
     SUPPORT_LEVEL = SupplierSupportLevel.OFFICIAL_API
 
-    def setup(self, client_id, client_secret, currency, language, location):
+    def setup(
+        self,
+        *,
+        client_id,
+        client_secret,
+        currency,
+        language,
+        location,
+        interactive_part_matches,
+        **kwargs,
+    ):
+        self.limit = interactive_part_matches
 
-        if not get_country(location):
+        if not (country := get_country(location)):
             return self.load_error(f"invalid country code '{location}'")
+        if (location := country["alpha_2"]) not in SUPPORTED_LOCATIONS:
+            return self.load_error(f"unsupported location '{location}'")
 
-        if not get_language(language):
+        if not (lang := get_language(language)):
             return self.load_error(f"invalid language code '{language}'")
+        if (language := lang["alpha_2"]) not in SUPPORTED_LANGUAGES:
+            return self.load_error(f"unsupported language '{language}'")  # print supported ones
+
+        if currency not in SUPPORTED_CURRENCIES:
+            return self.load_error(f"unsupported currency '{currency}'")
 
         self.currency = currency
-        self.language = language
-        self.location = location
-
-        logging.getLogger("digikey.v4.api").setLevel(logging.CRITICAL)
-        self.client = DigikeyApi(
-            client_id=client_id,
-            client_secret=client_secret,
-            storage_path=str(DIGIKEY_CACHE),
-        )
+        self.digikey_api = DigiKeyApi(client_id, client_secret, self.currency, language, location)
 
         return True
 
     def search(self, search_term):
-        for retry in retry_timeouts():
-            with retry:
-                try:
-                    digikey_part = self.client.product_details(search_term)
-                except Exception as e:
-                    digikey_part = None
-                    continue
-        # Removed matching on digikey part number as the new api matches on manufacturer product number
-        # Thus, removing the need to use keyword_search to find manufacturers product number
-        # The logic for keyword search is still useful for partial matches.
-        # The line below is the original line updated for the v4 api.
-        # if digikey_part and search_term == digikey_part.product.product_variations[0].digi_key_product_number:
-        if digikey_part:
-            return [self.get_api_part(digikey_part.product)], 1
+        if result := self.digikey_api.product_details(search_term):
+            product_details = result["Product"]
+            if search_term in self._get_product_variations(product_details):
+                return [self.get_api_part(product_details, search_term)], 1
 
-        for retry in retry_timeouts():
-            with retry:
-                results = self.client.keyword_search(
-                    body=KeywordRequest(keywords=search_term, limit=10),
-                )
+        if not (result := self.digikey_api.keyword_search(search_term, limit=self.limit)):
+            return [], 0
 
-        if len(results.exact_matches) > 0:
-            filtered_results = results.exact_matches
-            product_count = len(results.exact_matches)
-        else:
-            filtered_results = [
-                digikey_part for digikey_part in results.products
-                if digikey_part.manufacturer_product_number.lower().startswith(search_term.lower())
-            ]
-            product_count = results.products_count
+        if exact_matches := result["ExactMatches"]:
+            if len(exact_matches) == 1:
+                return [self.get_api_part(exact_matches[0])], 1
+            else:
+                return list(map(self.get_api_part, exact_matches)), len(exact_matches)
 
-        exact_matches = [
-            digikey_part for digikey_part in filtered_results
-            if digikey_part.manufacturer_product_number.lower() == search_term.lower()
+        products = [
+            product
+            for product in result["Products"]
+            if product["ManufacturerProductNumber"].lower().startswith(search_term.lower())
         ]
-        if len(exact_matches) == 1:
-            return [self.get_api_part(exact_matches[0])], 1
+        return list(map(self.get_api_part, products)), result["ProductsCount"]
 
-        if not exact_matches and product_count == 1 and len(filtered_results) > 1:
-            # the digikey api returns all product variants of the same product if the full MPN
-            # was not specified, in that case: pick the Cut Tape one if possible
-            for digikey_part in filtered_results:
-                packaging = digikey_part.packaging.value
-                if "Cut Tape" in packaging or "CT" in packaging:
-                    return [self.get_api_part(digikey_part)], 1
-            return [self.get_api_part(filtered_results[0])], 1
+    def get_api_part(self, product_details, digikey_part_number=None):
+        if digikey_part_number:
+            product_variation = self._get_product_variations(product_details)[digikey_part_number]
+        else:
+            product_variation = sorted(
+                product_details["ProductVariations"],
+                key=lambda variation: variation["MinimumOrderQuantity"],
+            )[0]
 
-        product_count = max(product_count, len(filtered_results))
-        return list(map(self.get_api_part, filtered_results)), product_count
-
-    def get_api_part(self, digikey_part: Product):
-        quantity_available = (
-                digikey_part.quantity_available + digikey_part.manufacturer_public_quantity)
-
-        # Categories are stored in a tree structure, so we need to build the full path
-        category_path = [digikey_part.category.name]
-        num_child = len(digikey_part.category.child_categories)
-        child_categories = digikey_part.category.child_categories
-
-        while num_child > 0:
-            child_category = child_categories[0]
-            category_path.append(child_category.name)
-            num_child = len(child_category.child_categories)
-            child_categories = child_category.child_categories
+        category_path = []
+        category = product_details["Category"]
+        while True:
+            category_path.append(category["Name"])
+            if not category["ChildCategories"]:
+                break
+            category = category["ChildCategories"][0]
 
         parameters = {
-            parameter.parameter_text: parameter.value_text
-            for parameter in digikey_part.parameters
+            parameter["ParameterText"]: parameter["ValueText"]
+            for parameter in product_details["Parameters"]
         }
-        # Only single unit pricing is available from the ProductDetails API
-        # If we want to add price breaks need to make a seperate call to ProductPricing API
-        # https://developer.digikey.com/products/product-information-v4/productsearch/productpricing
-        price_breaks = {1: digikey_part.unit_price}
 
-        # Had issue with some products missing http/https in the datasheet url
-        datasheet_url = digikey_part.datasheet_url
-        if datasheet_url.startswith("//"):
-            datasheet_url = "https:" + datasheet_url
-        if not datasheet_url.startswith("http"):
-            datasheet_url = ""
-
-        # Digikey part number now stored in product_variations
-        digikey_part_number = digikey_part.product_variations[0].digi_key_product_number
+        price_breaks = {
+            price_break["BreakQuantity"]: price_break["UnitPrice"]
+            for price_break in product_variation["StandardPricing"]
+        }
 
         return ApiPart(
-            description=digikey_part.description.product_description,
-            image_url=digikey_part.photo_url,
-            datasheet_url=datasheet_url,
-            supplier_link=digikey_part.product_url,
-            SKU=digikey_part_number,
-            manufacturer=digikey_part.manufacturer.name,
+            description=product_details["Description"]["DetailedDescription"],
+            image_url=product_details["PhotoUrl"],
+            datasheet_url=product_details["DatasheetUrl"],
+            supplier_link=product_details["ProductUrl"],
+            SKU=product_variation["DigiKeyProductNumber"],
+            manufacturer=product_details["Manufacturer"]["Name"],
             manufacturer_link="",
-            MPN=digikey_part.manufacturer_product_number,
-            quantity_available=quantity_available,
-            # packing information not in ProductDetails API
-            packaging="",  # digikey_part.packaging.value,
+            MPN=product_details["ManufacturerProductNumber"],
+            quantity_available=product_variation["QuantityAvailableforPackageType"],
+            packaging=product_variation["PackageType"]["Name"],
             category_path=category_path,
             parameters=parameters,
             price_breaks=price_breaks,
             currency=self.currency,
         )
+
+    @classmethod
+    def _get_product_variations(cls, product_details):
+        return {var["DigiKeyProductNumber"]: var for var in product_details["ProductVariations"]}
+
+
+class DigiKeyApi:
+    BASE_URL = "https://api.digikey.com"
+    OAUTH2_TOKEN_URL = f"{BASE_URL}/v1/oauth2/token"
+    KEYWORD_SEARCH_URL = f"{BASE_URL}/products/v4/search/keyword"
+    PRODUCT_DETAILS_URL = f"{BASE_URL}/products/v4/search/{{}}/productdetails"
+
+    def __init__(self, client_id, client_secret, currency, language, location):
+        oauth_client = BackendApplicationClient(client_id)
+        self.session = OAuth2Session(client=oauth_client)
+        self.session.fetch_token(self.OAUTH2_TOKEN_URL, client_secret=client_secret)
+
+        headers = {
+            "X-DIGIKEY-Client-Id": client_id,
+            "X-DIGIKEY-Locale-Language": language,
+            "X-DIGIKEY-Locale-Currency": currency,
+            "X-DIGIKEY-Locale-Site": location,
+        }
+        self.session.headers.update(headers)
+
+    def keyword_search(self, search_term, limit=0):
+        json = {"Keywords": search_term, "Limit": limit}
+        if result := self._api_call(self.KEYWORD_SEARCH_URL, json=json):
+            return result.json()
+
+    def product_details(self, product_number):
+        url = self.PRODUCT_DETAILS_URL.format(quote(product_number, safe=""))
+        if result := self._api_call(url):
+            return result.json()
+
+    def _api_call(self, url, json=None):
+        result = None
+
+        try:
+            for retry in retry_timeouts():
+                with retry:
+                    result = (
+                        self.session.get(url) if json is None else self.session.post(url, json=json)
+                    )
+                    if result.status_code == 404 and result.json()["title"] == "Not Found":
+                        return result
+                    result.raise_for_status()
+        except (HTTPError, Timeout):
+            assert result is not None
+            error(result.json()["detail"], prefix="DigiKey API error: ")
+        except (JSONDecodeError, KeyError) as e:
+            error(str(e), prefix="DigiKey API error: ")
+
+        return result
+
+
+SUPPORTED_LANGUAGES = [
+    *["en", "ja", "de", "fr", "ko", "zhs", "zht", "it", "es", "he", "nl", "sv", "pl", "fi", "da"],
+    *["no"],
+]
+
+SUPPORTED_CURRENCIES = [
+    *["USD", "CAD", "JPY", "GBP", "EUR", "HKD", "SGD", "TWD", "KRW", "AUD", "NZD", "INR", "DKK"],
+    *["NOK", "SEK", "ILS", "CNY", "PLN", "CHF", "CZK", "HUF", "RON", "ZAR", "MYR", "THB", "PHP"],
+]
+
+SUPPORTED_LOCATIONS = [
+    *["US", "CA", "JP", "UK", "DE", "AT", "BE", "DK", "FI", "GR", "IE", "IT", "LU", "NL", "NO"],
+    *["PT", "ES", "KR", "HK", "SG", "CN", "TW", "AU", "FR", "IN", "NZ", "SE", "MX", "CH", "IL"],
+    *["PL", "SK", "SI", "LV", "LT", "EE", "CZ", "HU", "BG", "MY", "ZA", "RO", "TH", "PH"],
+]

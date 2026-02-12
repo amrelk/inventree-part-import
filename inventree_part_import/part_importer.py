@@ -4,6 +4,7 @@ from multiprocessing.pool import ThreadPool
 from string import Formatter, _string
 
 from cutie import select
+from error_helper import BOLD, BOLD_END, error, hint, info, prompt, prompt_input, success, warning
 from inventree.company import Company, ManufacturerPart, SupplierPart, SupplierPriceBreak
 from inventree.part import Parameter, Part
 from jinja2 import Template
@@ -13,7 +14,6 @@ from thefuzz import fuzz
 
 from .categories import setup_categories_and_parameters
 from .config import CATEGORIES_CONFIG, CONFIG, get_config, get_pre_creation_hooks
-from .error_helper import *
 from .inventree_helpers import (create_manufacturer, get_manufacturer_part,
                                 get_parameter_templates, get_part, get_supplier_part,
                                 update_object_data, upload_datasheet, upload_image)

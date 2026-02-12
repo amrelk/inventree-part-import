@@ -1,18 +1,17 @@
 import importlib.metadata, logging
 from pathlib import Path
 
-import click, tablib, tablib.formats
+import click, error_helper, tablib, tablib.formats
 from cutie import prompt_yes_or_no, select
+from error_helper import error, hint, info, prompt, success, warning
 from inventree.api import InvenTreeAPI
 from inventree.part import Part
 from requests.exceptions import HTTPError, Timeout
 from tablib.exceptions import TablibException, UnsupportedFormat
 from thefuzz import fuzz
 
-from . import error_helper
 from .config import (CONFIG, SUPPLIERS_CONFIG, get_config, get_config_dir, set_config_dir,
                      setup_inventree_api, update_config_file, update_supplier_config)
-from .error_helper import *
 from .inventree_helpers import get_category, get_category_parts
 from .part_importer import ImportResult, IPNSetting, PartImporter
 from .suppliers import get_suppliers, setup_supplier_companies
@@ -329,7 +328,7 @@ class DryInvenTreeAPI(InvenTreeAPI):
     DRY_RUN = True
 
     def __init__(self, host=None, **kwargs):
-        self.base_url = "running in dry mode"
+        self.base_url = "inventree/"
         pass
 
     def get(self, url, **kwargs):
@@ -339,7 +338,7 @@ class DryInvenTreeAPI(InvenTreeAPI):
         return []
 
     def post(self, url, data, **kwargs):
-        return {"pk": 1337133742, "url": "", **data}
+        return {"pk": 1, "url": "", **data}
 
     def testServer(self):
         raise NotImplementedError()

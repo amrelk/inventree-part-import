@@ -5,6 +5,8 @@ from functools import cache
 from hashlib import sha256
 
 import requests
+from error_helper import info, warning
+from fake_useragent import UserAgent
 from inventree.api import InvenTreeAPI
 from inventree.base import ImageMixin, InventreeObject
 from inventree.company import Company as InventreeCompany
@@ -14,7 +16,6 @@ from platformdirs import user_cache_path
 from requests.compat import unquote, urlparse
 from requests.exceptions import ConnectionError, HTTPError, Timeout
 
-from .error_helper import *
 from .retries import retry_timeouts
 
 INVENTREE_CACHE = user_cache_path(__package__, ensure_exists=True) / "inventree"
@@ -22,9 +23,6 @@ INVENTREE_CACHE.mkdir(parents=True, exist_ok=True)
 
 def get_supplier_part(inventree_api: InvenTreeAPI, company: InventreeCompany, sku):
     supplier_parts = SupplierPart.list(inventree_api, SKU=sku)
-    if len(supplier_parts) == 1:
-        return supplier_parts[0]
-
     company_supplier_parts = [part for part in supplier_parts if part.supplier == company.pk]
     if len(company_supplier_parts) == 1:
         return company_supplier_parts[0]
@@ -169,8 +167,6 @@ def url2filename(url):
         parsed = urlparse(url.replace("https://", "scheme://"))
     return unquote(parsed.path.split("/")[-1])
 
-DOWNLOAD_HEADERS = {"User-Agent": "Mozilla/5.0"}
-
 from ssl import PROTOCOL_TLSv1_2
 
 class TLSv1_2HTTPAdapter(requests.adapters.HTTPAdapter):
@@ -186,11 +182,15 @@ class TLSv1_2HTTPAdapter(requests.adapters.HTTPAdapter):
 def _download_file_content(url):
     session = requests.Session()
     session.mount("https://", TLSv1_2HTTPAdapter())
+    session.headers.update({
+        "User-Agent": UserAgent(os=["iOS"]).random,
+        "Accept-Language": "en-US,en",
+    })
 
     try:
         for retry in retry_timeouts():
             with retry:
-                result = session.get(url, headers=DOWNLOAD_HEADERS)
+                result = session.get(url)
                 result.raise_for_status()
     except (ConnectionError, HTTPError, Timeout) as e:
         warning(f"failed to download file with '{e}'")

@@ -7,10 +7,10 @@ from timeit import default_timer
 from types import MethodType
 
 import requests
+from error_helper import error
 from requests.compat import quote, urlencode
 from requests.exceptions import HTTPError, JSONDecodeError, Timeout
 
-from ..error_helper import *
 from ..localization import get_country, get_language
 from ..retries import retry_timeouts
 from .base import REMOVE_HTML_TAGS, ApiPart, Supplier, SupplierSupportLevel
@@ -18,7 +18,7 @@ from .base import REMOVE_HTML_TAGS, ApiPart, Supplier, SupplierSupportLevel
 class TME(Supplier):
     SUPPORT_LEVEL = SupplierSupportLevel.OFFICIAL_API
 
-    def setup(self, api_token, api_secret, currency, language, location):
+    def setup(self, *, api_token, api_secret, currency, language, location, **kwargs):
         temp_api = TMEApi(api_token, api_secret)
         tme_languages = temp_api.get_languages().json()["Data"]["LanguageList"]
         tme_countries = {
@@ -27,19 +27,18 @@ class TME(Supplier):
 
         if not (lang := get_language(language)):
             return self.load_error(f"invalid language code '{language}'")
-        if not lang["alpha_2"] in tme_languages:
+        if (language := lang["alpha_2"]) not in tme_languages:
             return self.load_error(f"unsupported language '{language}'")
         language = lang["alpha_2"]
 
         if not (country := get_country(location)):
             return self.load_error(f"invalid country code '{location}'")
-        if not country["alpha_2"] in tme_countries:
+        if (location := country["alpha_2"]) not in tme_countries:
             return self.load_error(f"unsupported location '{location}'")
         if currency not in tme_countries[country["alpha_2"]]["CurrencyList"]:
             return self.load_error(
                 f"unsupported currency '{currency}' for location '{location}'"
             )
-        location = country["alpha_2"]
 
         self.tme_api = TMEApi(api_token, api_secret, language, location, currency)
 
@@ -73,9 +72,8 @@ class TME(Supplier):
         return list(map(self.get_api_part, filtered_matches, tme_stocks)), len(filtered_matches)
 
     def get_api_part(self, tme_part, tme_stock):
-        to_net_price = 1 if tme_stock["PriceType"] == "NET" else 100 / (100 + tme_stock["VatRate"])
         price_breaks = {
-            price_break["Amount"]: price_break["PriceValue"] * to_net_price
+            price_break["Amount"]: price_break["PriceValue"]
             for price_break in tme_stock.get("PriceList", [])
         }
 
@@ -121,9 +119,6 @@ class TME(Supplier):
         return True
 
 def fix_tme_url(url):
-    if url and url.startswith("//"):
-        url = f"https:{url}"
-
     # fix supplier part url if language is set to czech (#15)
     if url and "tme.eu/cs/" in url:
         url = url.replace("tme.eu/cs/", "tme.eu/cz/", 1)
@@ -210,6 +205,13 @@ class TMEApi:
         if result := self._api_call("Products/GetPricesAndStocks", data):
             result_data = result.json()["Data"]
             assert result_data["Currency"] == self.currency
+
+            if result_data["PriceType"] == "GROSS":
+                for product in result_data["ProductList"]:
+                    to_net_price = 100 / (100 + product["VatRate"])
+                    for price_break in product["PriceList"]:
+                        price_break["PriceValue"] *= to_net_price
+
             return result_data["ProductList"]
         return []
 
@@ -257,9 +259,11 @@ class TMEApi:
         url = f"{self.BASE_URL}{action}.json"
         data_sorted = dict(sorted({**data, "Token": self.token}.items()))
 
-        signature_base = f"POST&{quote(url, '')}&{quote(urlencode(data_sorted), '')}".encode()
+        signature_base = f"POST&{quote(url, '')}&{quote(urlencode(data_sorted, quote_via=quote), '')}".encode()
         signature = b64encode(hmac.new(self.secret.encode(), signature_base, sha1).digest())
         data_sorted["ApiSignature"] = signature
+
+        result = None
 
         try:
             for retry in retry_timeouts():
@@ -268,8 +272,8 @@ class TMEApi:
                     result.raise_for_status()
         except (HTTPError, Timeout) as e:
             try:
-                status = result.json()["Status"]
-                if status == "E_INPUT_PARAMS_VALIDATION_ERROR":
+                assert result is not None
+                if (status := result.json()["Status"]) == "E_INPUT_PARAMS_VALIDATION_ERROR":
                     return None
                 error(f"'{action}' action failed with '{status}'", prefix="TME API error: ")
             except (JSONDecodeError, KeyError):
