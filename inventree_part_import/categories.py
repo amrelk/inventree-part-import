@@ -73,7 +73,7 @@ def setup_categories_and_parameters(inventree_api):
                 break
         else:
             path_str = part_category.pathstring
-            warning(f"category '{path_str}' on host is not defined in {CATEGORIES_CONFIG}")
+            # warning(f"category '{path_str}' on host is not defined in {CATEGORIES_CONFIG}") # TODO FIX CATEGORIES ON INVENTREE INSTANCE SO I DONT HAVE TO SUPPRESS THIS
 
     parameter_templates = {
         parameter_template.name: parameter_template
